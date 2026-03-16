@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/zicsus/lrucache-go/lru"
+	lru "github.com/zicsus/lrucache-go"
 )
 
 func main() {
