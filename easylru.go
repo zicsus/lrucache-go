@@ -1,4 +1,4 @@
-package lru
+package easylru
 
 import (
 	"sync"
@@ -8,19 +8,19 @@ import (
 type LRUCache[K comparable, V any] struct {
 	mu       sync.Mutex
 	Cache    map[K]*Node[K, V]
-	Head     *Node[K, V]
-	Tail     *Node[K, V]
-	Size     int
-	Capacity int
-	TTL      time.Duration
+	head     *Node[K, V]
+	tail     *Node[K, V]
+	size     int
+	capacity int
+	ttl      time.Duration
 	done     chan struct{}
 }
 
 type Node[K comparable, V any] struct {
 	Key       K
 	Value     V
-	Prev      *Node[K, V]
-	Next      *Node[K, V]
+	prev      *Node[K, V]
+	next      *Node[K, V]
 	CreatedAt time.Time
 }
 
@@ -34,7 +34,7 @@ func createNode[K comparable, V any](key K, value V) *Node[K, V] {
 }
 
 func (c *LRUCache[K, V]) startCleanup() {
-	timer := time.NewTicker(c.TTL / 2)
+	timer := time.NewTicker(c.ttl / 2)
 	go func() {
 		for {
 			select {
@@ -56,35 +56,35 @@ func (c *LRUCache[K, V]) startCleanup() {
 }
 
 func (c *LRUCache[K, V]) addToFront(node *Node[K, V]) {
-	node.Next = c.Head.Next
-	node.Prev = c.Head
-	c.Head.Next.Prev = node
-	c.Head.Next = node
-	c.Size++
+	node.next = c.head.next
+	node.prev = c.head
+	c.head.next.prev = node
+	c.head.next = node
+	c.size++
 }
 
 func (c *LRUCache[K, V]) remove(node *Node[K, V]) {
-	node.Prev.Next = node.Next
-	node.Next.Prev = node.Prev
-	node.Next = nil
-	node.Prev = nil
-	c.Size--
+	node.prev.next = node.next
+	node.next.prev = node.prev
+	node.next = nil
+	node.prev = nil
+	c.size--
 }
 
-func NewLRUCache[K comparable, V any](capacity int, ttl time.Duration) *LRUCache[K, V] {
+func New[K comparable, V any](capacity int, ttl time.Duration) *LRUCache[K, V] {
 	var head = Node[K, V]{}
 	var tail = Node[K, V]{}
 
-	head.Next = &tail
-	tail.Prev = &head
+	head.next = &tail
+	tail.prev = &head
 
 	var lruCache = LRUCache[K, V]{
 		Cache:    map[K]*Node[K, V]{},
-		Head:     &head,
-		Tail:     &tail,
-		Size:     0,
-		Capacity: capacity,
-		TTL:      ttl,
+		head:     &head,
+		tail:     &tail,
+		size:     0,
+		capacity: capacity,
+		ttl:      ttl,
 		done:     make(chan struct{}),
 	}
 
@@ -99,30 +99,14 @@ func (c *LRUCache[K, V]) Close() {
 	close(c.done)
 }
 
-func (c *LRUCache[K, V]) IsNodeExpired(node *Node[K, V]) bool {
-	return time.Now().After(node.CreatedAt.Add(c.TTL))
-}
-
-func (c *LRUCache[K, V]) Get(key K) (V, bool) {
+func (c *LRUCache[K, V]) Size() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.size
+}
 
-	node, ok := c.Cache[key]
-	if !ok {
-		var zero V
-		return zero, false
-	}
-
-	if c.TTL > 0 && c.IsNodeExpired(node) {
-		c.remove(node)
-		delete(c.Cache, node.Key)
-		var zero V
-		return zero, false
-	}
-
-	c.remove(node)
-	c.addToFront(node)
-	return node.Value, true
+func (c *LRUCache[K, V]) IsNodeExpired(node *Node[K, V]) bool {
+	return time.Now().After(node.CreatedAt.Add(c.ttl))
 }
 
 func (c *LRUCache[K, V]) Put(key K, value V) {
@@ -135,15 +119,50 @@ func (c *LRUCache[K, V]) Put(key K, value V) {
 		node.CreatedAt = time.Now()
 		c.remove(node)
 		c.addToFront(node)
-	} else if c.Size < c.Capacity {
+	} else if c.size < c.capacity {
 		var newNode = createNode(key, value)
 		c.addToFront(newNode)
 		c.Cache[key] = newNode
 	} else {
 		var newNode = createNode(key, value)
-		delete(c.Cache, c.Tail.Prev.Key)
-		c.remove(c.Tail.Prev)
+		delete(c.Cache, c.tail.prev.Key)
+		c.remove(c.tail.prev)
 		c.addToFront(newNode)
 		c.Cache[key] = newNode
 	}
+}
+
+func (c *LRUCache[K, V]) Get(key K) (V, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	node, ok := c.Cache[key]
+	if !ok {
+		var zero V
+		return zero, false
+	}
+
+	if c.ttl > 0 && c.IsNodeExpired(node) {
+		c.remove(node)
+		delete(c.Cache, node.Key)
+		var zero V
+		return zero, false
+	}
+
+	c.remove(node)
+	c.addToFront(node)
+	return node.Value, true
+}
+
+func (c *LRUCache[K, V]) Peak(key K) (V, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	node, ok := c.Cache[key]
+	if !ok {
+		var zero V
+		return zero, false
+	}
+
+	return node.Value, true
 }
