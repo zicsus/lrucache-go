@@ -154,7 +154,7 @@ func (c *LRUCache[K, V]) Get(key K) (V, bool) {
 	return node.Value, true
 }
 
-func (c *LRUCache[K, V]) Peak(key K) (V, bool) {
+func (c *LRUCache[K, V]) Peek(key K) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
