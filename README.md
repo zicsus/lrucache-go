@@ -75,7 +75,22 @@ Returns the value and marks it most recently used. Returns the zero value and `f
 ```go
 func (c *LRUCache[K, V]) Peek(key K) (V, bool)
 ```
-Returns the value without updating recency or checking expiration.
+Returns the value without updating recency. Returns the zero value and `false` if the key is missing or expired.
+
+```go
+func (c *LRUCache[K, V]) Contains(key K) bool
+```
+Reports whether the key is in the cache. Returns `false` for expired entries. Does not update recency.
+
+```go
+func (c *LRUCache[K, V]) Delete(key K) bool
+```
+Removes the entry for `key` and returns `true` if it existed.
+
+```go
+func (c *LRUCache[K, V]) Clear()
+```
+Removes all entries.
 
 ```go
 func (c *LRUCache[K, V]) Size() int

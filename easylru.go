@@ -7,28 +7,28 @@ import (
 
 type LRUCache[K comparable, V any] struct {
 	mu       sync.Mutex
-	Cache    map[K]*Node[K, V]
-	head     *Node[K, V]
-	tail     *Node[K, V]
+	cache    map[K]*node[K, V]
+	head     *node[K, V]
+	tail     *node[K, V]
 	size     int
 	capacity int
 	ttl      time.Duration
 	done     chan struct{}
 }
 
-type Node[K comparable, V any] struct {
-	Key       K
-	Value     V
-	prev      *Node[K, V]
-	next      *Node[K, V]
-	CreatedAt time.Time
+type node[K comparable, V any] struct {
+	key       K
+	value     V
+	prev      *node[K, V]
+	next      *node[K, V]
+	createdAt time.Time
 }
 
-func createNode[K comparable, V any](key K, value V) *Node[K, V] {
-	var node = Node[K, V]{
-		Key:       key,
-		Value:     value,
-		CreatedAt: time.Now(),
+func createNode[K comparable, V any](key K, value V) *node[K, V] {
+	var node = node[K, V]{
+		key:       key,
+		value:     value,
+		createdAt: time.Now(),
 	}
 	return &node
 }
@@ -40,9 +40,9 @@ func (c *LRUCache[K, V]) startCleanup() {
 			select {
 			case <-timer.C:
 				c.mu.Lock()
-				for _, node := range c.Cache {
-					if c.IsNodeExpired((node)) {
-						delete(c.Cache, node.Key)
+				for _, node := range c.cache {
+					if c.isNodeExpired((node)) {
+						delete(c.cache, node.key)
 						c.remove(node)
 					}
 				}
@@ -55,7 +55,7 @@ func (c *LRUCache[K, V]) startCleanup() {
 	}()
 }
 
-func (c *LRUCache[K, V]) addToFront(node *Node[K, V]) {
+func (c *LRUCache[K, V]) addToFront(node *node[K, V]) {
 	node.next = c.head.next
 	node.prev = c.head
 	c.head.next.prev = node
@@ -63,7 +63,7 @@ func (c *LRUCache[K, V]) addToFront(node *Node[K, V]) {
 	c.size++
 }
 
-func (c *LRUCache[K, V]) remove(node *Node[K, V]) {
+func (c *LRUCache[K, V]) remove(node *node[K, V]) {
 	node.prev.next = node.next
 	node.next.prev = node.prev
 	node.next = nil
@@ -72,14 +72,14 @@ func (c *LRUCache[K, V]) remove(node *Node[K, V]) {
 }
 
 func New[K comparable, V any](capacity int, ttl time.Duration) *LRUCache[K, V] {
-	var head = Node[K, V]{}
-	var tail = Node[K, V]{}
+	var head = node[K, V]{}
+	var tail = node[K, V]{}
 
 	head.next = &tail
 	tail.prev = &head
 
 	var lruCache = LRUCache[K, V]{
-		Cache:    map[K]*Node[K, V]{},
+		cache:    map[K]*node[K, V]{},
 		head:     &head,
 		tail:     &tail,
 		size:     0,
@@ -105,30 +105,30 @@ func (c *LRUCache[K, V]) Size() int {
 	return c.size
 }
 
-func (c *LRUCache[K, V]) IsNodeExpired(node *Node[K, V]) bool {
-	return time.Now().After(node.CreatedAt.Add(c.ttl))
+func (c *LRUCache[K, V]) isNodeExpired(node *node[K, V]) bool {
+	return time.Now().After(node.createdAt.Add(c.ttl))
 }
 
 func (c *LRUCache[K, V]) Put(key K, value V) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	node, ok := c.Cache[key]
+	node, ok := c.cache[key]
 	if ok {
-		node.Value = value
-		node.CreatedAt = time.Now()
+		node.value = value
+		node.createdAt = time.Now()
 		c.remove(node)
 		c.addToFront(node)
 	} else if c.size < c.capacity {
 		var newNode = createNode(key, value)
 		c.addToFront(newNode)
-		c.Cache[key] = newNode
+		c.cache[key] = newNode
 	} else {
 		var newNode = createNode(key, value)
-		delete(c.Cache, c.tail.prev.Key)
+		delete(c.cache, c.tail.prev.key)
 		c.remove(c.tail.prev)
 		c.addToFront(newNode)
-		c.Cache[key] = newNode
+		c.cache[key] = newNode
 	}
 }
 
@@ -136,33 +136,69 @@ func (c *LRUCache[K, V]) Get(key K) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	node, ok := c.Cache[key]
+	node, ok := c.cache[key]
 	if !ok {
 		var zero V
 		return zero, false
 	}
 
-	if c.ttl > 0 && c.IsNodeExpired(node) {
+	if c.ttl > 0 && c.isNodeExpired(node) {
 		c.remove(node)
-		delete(c.Cache, node.Key)
+		delete(c.cache, node.key)
 		var zero V
 		return zero, false
 	}
 
 	c.remove(node)
 	c.addToFront(node)
-	return node.Value, true
+	return node.value, true
 }
 
 func (c *LRUCache[K, V]) Peek(key K) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	node, ok := c.Cache[key]
-	if !ok {
+	node, ok := c.cache[key]
+	if !ok || (c.ttl > 0 && c.isNodeExpired(node)) {
 		var zero V
 		return zero, false
 	}
 
-	return node.Value, true
+	return node.value, true
+}
+
+func (c *LRUCache[K, V]) Contains(key K) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	node, ok := c.cache[key]
+	if !ok || (c.ttl > 0 && c.isNodeExpired(node)) {
+		return false
+	}
+
+	return true
+}
+
+func (c *LRUCache[K, V]) Delete(key K) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	node, ok := c.cache[key]
+	if !ok {
+		return false
+	}
+
+	c.remove(node)
+	delete(c.cache, node.key)
+	return true
+}
+
+func (c *LRUCache[K, V]) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cache = make(map[K]*node[K, V])
+	c.head.next = c.tail
+	c.tail.prev = c.head
+	c.size = 0
 }
